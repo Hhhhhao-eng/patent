@@ -8,6 +8,9 @@ from collections import defaultdict
 from torch.nn import Parameter
 import random
 import os
+from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score
+from sklearn.metrics.cluster import contingency_matrix
+from scipy.optimize import linear_sum_assignment
 
 
 class SACN(nn.Module):
@@ -404,6 +407,47 @@ class KnowledgeCompletion:
 
                 return entity_clusters, None
 
+    def evaluate_clustering(self, entity_clusters, true_labels=None):
+        """
+        评估聚类效果 (ACC, NMI, ARI)
+        Args:
+            entity_clusters: 实体到聚类ID的映射字典
+            true_labels: 实体真实标签字典 (entity->label)
+        Returns:
+            metrics: 包含ACC, NMI, ARI的字典
+        """
+        if true_labels is None:
+            print("Warning: True labels not provided. Only clustering assignments returned.")
+            return {}
+
+        # 准备标签数组
+        pred_labels = []
+        true_label_list = []
+
+        for entity, cluster_id in entity_clusters.items():
+            if entity in true_labels:
+                pred_labels.append(cluster_id)
+                true_label_list.append(true_labels[entity])
+
+        pred_labels = np.array(pred_labels)
+        true_label_list = np.array(true_label_list)
+
+        # 计算NMI和ARI
+        nmi = normalized_mutual_info_score(true_label_list, pred_labels)
+        ari = adjusted_rand_score(true_label_list, pred_labels)
+
+        # 计算ACC (需要最优匹配)
+        contingency = contingency_matrix(true_label_list, pred_labels)
+        cost_matrix = contingency.max() - contingency
+        row_ind, col_ind = linear_sum_assignment(cost_matrix)
+        acc = contingency[row_ind, col_ind].sum() / np.sum(contingency)
+
+        return {
+            'ACC': acc,
+            'NMI': nmi,
+            'ARI': ari
+        }
+
     def visualize_clusters(self, model, entity_clusters, cluster_centers=None,
                            sample_size=500, random_state=42, method='pca',
                            save_path=None, dpi=300):
@@ -498,6 +542,19 @@ class KnowledgeCompletion:
         return fig
 
 
+def load_true_labels(file_path):
+    """加载实体真实标签"""
+    true_labels = {}
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            parts = line.strip().split('\t')
+            if len(parts) >= 2:
+                entity = parts[0]
+                label = int(parts[1])
+                true_labels[entity] = label
+    return true_labels
+
+
 def load_refined_embeddings(file_path):
     """加载强化学习后的实体嵌入"""
     embeddings = {}
@@ -550,6 +607,59 @@ def load_triplets_from_files(files):
     return triplets
 
 
+def extract_patent_titles(document_text):
+    # 存储唯一专利标题的集合
+    unique_titles = set()
+
+    # 按行分割文档
+    lines = document_text.strip().split('\n')
+
+    for line in lines:
+        # 检查是否包含标题分隔符
+        if "---titleKey---" in line:
+            # 分割出专利标题部分
+            title_part = line.split("---titleKey---")[0].strip()
+            # 添加到集合（自动去重）
+            unique_titles.add(title_part)
+
+    # 将唯一标题写入文件
+    with open("patent_titles.txt", "w", encoding="utf-8") as f:
+        for title in sorted(unique_titles):  # 按字母排序
+            f.write(title + "\n")
+
+
+from sklearn.cluster import KMeans
+
+
+def generate_cluster_labels(embeddings_file, output_file, n_clusters=10):
+    """基于实体嵌入生成聚类标签"""
+    embeddings = {}
+
+    # 加载嵌入
+    with open(embeddings_file, 'r', encoding='utf-8') as f:
+        for line in f:
+            parts = line.strip().split('\t')
+            if len(parts) >= 2:
+                patent_id = parts[0]
+                embedding = np.array([float(x) for x in parts[1].split()])
+                embeddings[patent_id] = embedding
+
+    # 准备数据
+    patent_ids = list(embeddings.keys())
+    embedding_matrix = np.array([embeddings[pid] for pid in patent_ids])
+
+    # 使用KMeans聚类
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42)
+    cluster_labels = kmeans.fit_predict(embedding_matrix)
+
+    # 保存标签文件
+    with open(output_file, 'w', encoding='utf-8') as f_out:
+        for pid, label in zip(patent_ids, cluster_labels):
+            f_out.write(f"{pid}\t{label}\n")
+
+    print(f"Generated cluster-based labels for {len(patent_ids)} patents")
+
+
 def main():
     # 1. 加载强化学习后的实体嵌入
     refined_embeddings = load_refined_embeddings('refined_patent_embeddings.txt')
@@ -567,22 +677,46 @@ def main():
         print("Error: No triplets loaded. Exiting.")
         return
 
-    # 3. 初始化知识补全模块 - 添加聚类数量参数
-    num_clusters = 10  # 设置聚类数量
+    # 3. 初始化知识补全模块
+    num_clusters = 5  # 设置聚类数量
     kc = KnowledgeCompletion(
         entity_embeddings=refined_embeddings,
         triplets=triplets,
         num_relations=4,
-        embedding_dim=len(next(iter(refined_embeddings.values()))),
+        embedding_dim=len(next(iter(refined_embeddings.values()))),  # 修改为64维
         num_clusters=num_clusters
     )
 
-    # 4. 训练知识补全模型（添加聚类损失系数）
-    model = kc.train(epochs=50, batch_size=256, lr=0.001, lambda_cluster=0.1)
+    # 4. 训练知识补全模型
+    model = kc.train(epochs=100, batch_size=256, lr=0.001, lambda_cluster=0.1)  # lr=0.01
+
+    with open("new_title_triplets.txt", "r", encoding="utf-8") as file:
+        document = file.read()
+    extract_patent_titles(document)
+
+    # 生成真实标签（选择一种方法）
+    generate_cluster_labels('refined_patent_embeddings.txt', 'true_labels.txt', n_clusters=5)
+    # 加载真实标签
+    true_labels = {}
+    with open('true_labels.txt', 'r', encoding='utf-8') as f:
+        for line in f:
+            parts = line.strip().split('\t')
+            if len(parts) >= 2:
+                entity = parts[0]
+                label = int(parts[1])
+                true_labels[entity] = label
 
     # 5. 执行实体聚类
     print("\nPerforming entity clustering...")
     entity_clusters, cluster_centers = kc.cluster_entities(model, use_kmeans=True)
+
+    # 评估聚类效果
+    if true_labels:
+        metrics = kc.evaluate_clustering(entity_clusters, true_labels)
+        print("\nClustering Evaluation Metrics:")
+        print(f"ACC: {metrics['ACC']:.4f}")
+        print(f"NMI: {metrics['NMI']:.4f}")
+        print(f"ARI: {metrics['ARI']:.4f}")
 
     # 打印部分聚类结果
     print("\nSample clustering results:")
@@ -590,19 +724,8 @@ def main():
     for entity in sample_entities:
         print(f"Entity: {entity} -> Cluster {entity_clusters[entity]}")
 
-    # 可视化聚类结果（可选）
+    # 可视化聚类结果
     try:
-        # # 使用PCA降维并保存图片
-        # kc.visualize_clusters(
-        #     model,
-        #     entity_clusters,
-        #     cluster_centers,
-        #     method='pca',
-        #     save_path='cluster_visualization_pca.png',
-        #     dpi=300
-        # )
-
-        # 使用t-SNE降维并保存图片
         kc.visualize_clusters(
             model,
             entity_clusters,
@@ -619,6 +742,7 @@ def main():
         for entity, cluster_id in entity_clusters.items():
             f.write(f"{entity}\t{cluster_id}\n")
     print("\nClustering results saved to entity_clusters.txt")
+
 
 if __name__ == '__main__':
     main()
