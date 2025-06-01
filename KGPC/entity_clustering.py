@@ -149,14 +149,18 @@ class KnowledgeCompletion:
         self.id2entity = {idx: entity for entity, idx in self.entity2id.items()}
         self.num_entities = len(self.entity2id)
 
-        # 创建关系映射
-        self.relation2id = {}
-        self.id2relation = {}
-        for _, rel, _ in triplets:
-            if rel not in self.relation2id:
-                rel_id = len(self.relation2id)
-                self.relation2id[rel] = rel_id
-                self.id2relation[rel_id] = rel
+        # 确保relation2id包含similar_to
+        self.relation2id = {
+            'titleKey': 0,
+            'clKey': 1,
+            'bgKey': 2,
+            'patentee': 3,
+            'similar_to': 4  # 明确添加
+        }
+        self.id2relation = {v: k for k, v in self.relation2id.items()}
+
+        # 重新计算实际关系数量
+        self.num_relations = len(self.relation2id)
 
         # 准备实体嵌入矩阵
         self.entity_emb_matrix = np.zeros((self.num_entities, embedding_dim))
@@ -331,6 +335,15 @@ class KnowledgeCompletion:
 
     def predict_missing_links(self, model, head_entity, relation, top_k=10):
         """预测缺失的链接"""
+        # 确保relation是有效的
+        if isinstance(relation, str):
+            if relation not in self.relation2id:
+                raise ValueError(f"Unknown relation: {relation}")
+            rel_idx = self.relation2id[relation]
+        else:
+            rel_idx = int(relation)
+            if rel_idx >= self.num_relations:
+                raise ValueError(f"Relation index {rel_idx} out of range")
         model.eval()
 
         # 获取实体索引
@@ -406,6 +419,65 @@ class KnowledgeCompletion:
                 }
 
                 return entity_clusters, None
+
+    def add_similar_to_relations(self, model, output_file, cluster_threshold=0.8, intra_cluster_only=True):
+        """
+        根据聚类结果为实体添加similar_to关系
+
+        Args:
+            model: 训练好的SACN模型
+            output_file: 输出文件路径
+            cluster_threshold: 相似度阈值(0-1)
+            intra_cluster_only: 是否只添加同一聚类内的相似关系
+        """
+        # 获取所有实体聚类结果
+        entity_clusters, _ = self.cluster_entities(model, use_kmeans=True)
+
+        # 获取所有实体嵌入
+        with torch.no_grad():
+            all_entities = torch.arange(self.num_entities).to(self.device)
+            entity_embeddings = model.emb_e(all_entities).cpu().numpy()
+
+        # 创建实体ID到索引的映射
+        entity_id_to_idx = {self.id2entity[i]: i for i in range(self.num_entities)}
+
+        # 计算实体间的余弦相似度
+        from sklearn.metrics.pairwise import cosine_similarity
+        similarity_matrix = cosine_similarity(entity_embeddings)
+
+        # 收集similar_to关系
+        similar_relations = set()  # 使用集合避免重复
+
+        # 遍历所有实体对
+        for i in range(self.num_entities):
+            entity_i = self.id2entity[i]
+            cluster_i = entity_clusters.get(entity_i, -1)
+
+            for j in range(i + 1, self.num_entities):
+                entity_j = self.id2entity[j]
+                cluster_j = entity_clusters.get(entity_j, -1)
+
+                # 如果设置只考虑同一聚类内的关系，且实体不在同一聚类则跳过
+                if intra_cluster_only and cluster_i != cluster_j:
+                    continue
+
+                # 获取相似度
+                sim_score = similarity_matrix[i][j]
+
+                # 如果相似度超过阈值，则添加关系
+                if sim_score >= cluster_threshold:
+                    # 确保关系是有序的，避免重复
+                    if entity_i < entity_j:
+                        similar_relations.add((entity_i, "similar_to", entity_j, sim_score))
+                    else:
+                        similar_relations.add((entity_j, "similar_to", entity_i, sim_score))
+
+        # 将关系写入文件
+        with open(output_file, 'w', encoding='utf-8') as f:
+            for rel in similar_relations:
+                f.write(f"{rel[0]}---{rel[1]}---{rel[2]}\n")
+
+        print(f"Generated {len(similar_relations)} similar_to relations, saved to {output_file}")
 
     def evaluate_clustering(self, entity_clusters, true_labels=None):
         """
@@ -678,12 +750,13 @@ def main():
         return
 
     # 3. 初始化知识补全模块
-    num_clusters = 5  # 设置聚类数量
+    num_clusters = 10  # 设置聚类数量
+    # 初始化知识补全模块时使用正确的relation数量
     kc = KnowledgeCompletion(
         entity_embeddings=refined_embeddings,
         triplets=triplets,
-        num_relations=4,
-        embedding_dim=len(next(iter(refined_embeddings.values()))),  # 修改为64维
+        num_relations=5,  # 包含similar_to关系
+        embedding_dim=len(next(iter(refined_embeddings.values()))),
         num_clusters=num_clusters
     )
 
@@ -742,6 +815,40 @@ def main():
         for entity, cluster_id in entity_clusters.items():
             f.write(f"{entity}\t{cluster_id}\n")
     print("\nClustering results saved to entity_clusters.txt")
+
+    # 6. 生成similar_to关系
+    print("\nGenerating similar_to relations based on clustering...")
+    kc.add_similar_to_relations(
+        model,
+        output_file='similar_to_relations.txt',
+        cluster_threshold=0.6,  # 可以根据需要调整
+        intra_cluster_only=True  # 只添加同一聚类内的相似关系
+    )
+
+    # 7. 重新加载包含新关系的知识图谱
+    print("\nReloading knowledge graph with similar_to relations...")
+    files = [
+        'new_title_triplets.txt',
+        'similar_to_relations.txt'
+    ]
+    triplets_with_similar = load_triplets_from_files(files)
+
+    # 使用增强后的三元组重新初始化
+    enhanced_kc = KnowledgeCompletion(
+        entity_embeddings=refined_embeddings,
+        triplets=triplets_with_similar,
+        num_relations=5,  # 增加了similar_to关系
+        embedding_dim=len(next(iter(refined_embeddings.values()))),
+        num_clusters=num_clusters
+    )
+
+    print("Knowledge graph enhancement completed.")
+
+    # 8. 训练知识补全模型（使用新的关系数量）
+    model = enhanced_kc.train(epochs=100, batch_size=256, lr=0.001, lambda_cluster=0.1)
+
+    # 保存新模型
+    torch.save(model.state_dict(), 'best_sacn_model_v2.pth')
 
 
 if __name__ == '__main__':
