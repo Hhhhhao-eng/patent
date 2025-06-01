@@ -1,0 +1,16 @@
+# Django服务配置
+django:
+  base-url: http://localhost:8000  # 开发环境
+  # base-url: http://django-service:8000 # 生产环境K8S配置
+
+# RestTemplate配置
+rest:
+  client:
+    connect-timeout: 5000
+    read-timeout: 10000
+
+# 安全配置
+security:
+  cors:
+    allowed-origins: "*"
+    allowed-methods: GET,POST
