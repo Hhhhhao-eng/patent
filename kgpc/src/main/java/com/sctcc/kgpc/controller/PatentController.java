@@ -1,57 +1,35 @@
-package main.java.com.sctcc.kgpc.controller;
+package com.sctcc.kgpc.controller;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.*;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
 @RestController
-@RequestMapping("/api/patents")
 public class PatentController {
-    
-    private final RestTemplate restTemplate;
-    
-    @Value("${django.base-url}")
-    private String djangoBaseUrl;
-    
-    // 使用构造器注入更安全
-    public PatentController(RestTemplate restTemplate) {
-        this.restTemplate = restTemplate;
-    }
-    
-    @GetMapping("/recommendations")
-    public ResponseEntity<?> getPatentRecommendations(
-            @RequestParam String patentId,
-            @RequestParam(required = false, defaultValue = "10") int topK) {
-        
-        // 构建带认证的请求头
-        HttpHeaders headers = new HttpHeaders();
-        headers.set("Accept", MediaType.APPLICATION_JSON_VALUE);
-        HttpEntity<?> entity = new HttpEntity<>(headers);
-        
-        // 使用URI builder更安全
-        String url = UriComponentsBuilder.fromHttpUrl(djangoBaseUrl)
-                .path("/api/patent_recommend")
-                .queryParam("patent_id", patentId)
-                .queryParam("top_k", topK)
-                .toUriString();
-        
-        try {
-            // 添加超时控制和错误处理
-            return restTemplate.exchange(
-                    url,
-                    HttpMethod.GET,
-                    entity,
-                    new ParameterizedTypeReference<Map<String, Object>>() {}
-            );
-        } catch (Exception e) {
-            // 自定义错误处理
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body(Map.of(
-                            "error", "Django service unavailable",
-                            "message", e.getMessage()
-                    ));
-        }
+    @Value("${django.ip}")
+    private String djangoIp; // 从配置文件中读取 Django 服务的 IP 地址
+    private final RestTemplate restTemplate = new RestTemplate();
+
+    @GetMapping("/patent_recommend")
+    public ResponseEntity<?> patentRecommend(@RequestParam(name = "patent_id") String patentId) {
+        String url = "http://" + djangoIp + ":8000/api/patent_recommend"; // Django 服务的完整 URL
+        // 使用 UriComponentsBuilder 构建带参数的 URL
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url)
+                .queryParam("patent_id", patentId);
+        // 执行 GET 请求
+        ResponseEntity<String> responseEntity = restTemplate.exchange(
+                builder.toUriString(), // 使用构建好的 URL
+                HttpMethod.GET,
+                null, // 使用 null 代表不发送任何请求
+                new ParameterizedTypeReference<String>() {} // 指定响应体类型为 String
+        );
+        return responseEntity;
     }
 }
