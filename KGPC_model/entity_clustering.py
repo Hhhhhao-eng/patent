@@ -263,8 +263,13 @@ class KnowledgeCompletion:
                 # 计算聚类损失
                 kl_loss = model.kl_loss(cluster_q)
 
+                # 新版损失函数（动态加权）
+                lambda_kc = 1 - epoch/100  # 随训练降低KC权重
+                lambda_kl = 0.3 + epoch/500  # 逐步增加KL权重
+
                 # 总损失 = 知识补全损失 + λ * 聚类损失
-                total_loss = kc_loss + lambda_cluster * kl_loss
+                # total_loss = kc_loss + lambda_cluster * kl_loss
+                total_loss = lambda_kc * kc_loss + lambda_kl * kl_loss
 
                 total_kc_loss += kc_loss.item()
                 total_kl_loss += kl_loss.item()
@@ -761,7 +766,7 @@ def main():
     )
 
     # 4. 训练知识补全模型
-    model = kc.train(epochs=100, batch_size=256, lr=0.001, lambda_cluster=0.1)  # lr=0.01
+    model = kc.train(epochs=100, batch_size=256, lr=0.01, lambda_cluster=0.1)  # lr=0.01
 
     with open("new_title_triplets.txt", "r", encoding="utf-8") as file:
         document = file.read()
@@ -845,7 +850,7 @@ def main():
     print("Knowledge graph enhancement completed.")
 
     # 8. 训练知识补全模型（使用新的关系数量）
-    model = enhanced_kc.train(epochs=100, batch_size=256, lr=0.001, lambda_cluster=0.1)
+    model = enhanced_kc.train(epochs=100, batch_size=256, lr=0.01, lambda_cluster=0.1)
 
     # 保存新模型
     torch.save(model.state_dict(), 'best_sacn_model_v2.pth')
