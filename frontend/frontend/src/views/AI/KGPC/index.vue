@@ -33,6 +33,14 @@ export default {
       error: ''
     };
   },
+  mounted() {
+    // 如果通过 query 传递了 patent_id，则自动查找推荐
+    const queryId = this.$route.query.patent_id;
+    if (queryId) {
+      this.searchObj.patent_id = queryId;
+      this.searchRecommend();
+    }
+  },
   methods: {
     async searchRecommend() {
       this.error = '';
@@ -69,8 +77,8 @@ export default {
       }
     },
     showDetail(row) {
-      // 详情页跳转可根据后端接口完善
-      // this.$router.push({ name: 'PatentDetail', params: { id: row.id } });
+      // 跳转到详情页，使用路由参数传递专利id
+      this.$router.push({ name: 'PatentDetail', params: { id: row.id } });
     }
   }
 };
