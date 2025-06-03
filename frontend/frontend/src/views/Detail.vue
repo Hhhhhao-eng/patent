@@ -1,6 +1,6 @@
 <template>
   <div class="detail-container">
-    <el-page-header @back="$router.go(-1)" title="返回" />
+    <el-page-header @back="goBackWithState" title="返回" />
     <el-card v-if="patent">
       <template #header>
         <h2>{{ patent.title }}</h2>
@@ -48,11 +48,21 @@ export default {
     this.fetchPatentDetail();
   },
   methods: {
+    goBackWithState() {
+      
+      this.$router.push({
+        name: 'KGPC',
+        query: { patent_id: this.patent ? this.patent.pid : '' }
+      });
+    },
     async fetchPatentDetail() {
       try {
         this.loading = true;
-        const response = await patentApi.getPatentDetail(this.id);
-        this.patent = response.data;
+        // 兼容路由参数传递方式
+        const patentId = this.id || this.$route.params.id;
+        const response = await patentApi.getPatentDetail(patentId);
+        // 适配后端返回结构
+        this.patent = response.data.data;
       } catch (err) {
         this.$message.error('获取专利详情失败');
       } finally {
