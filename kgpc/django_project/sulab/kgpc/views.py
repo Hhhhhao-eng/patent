@@ -409,18 +409,41 @@ class KGPCFindPath(View):
             
             # 2. 如果Neo4j中没有找到路径，则使用模型预测
             if not paths:
-                # 使用模型预测路径
-                predicted_paths = kc_model.predict_path(
+                # 使用模型预测双向路径
+                start_time = time.time()
+                
+                # 1. 尝试正向路径预测 (entity1 -> entity2)
+                forward_paths = kc_model.predict_path(
                     model=sacn_model,
                     head_entity=entity1,
                     tail_entity=entity2,
                     max_depth=max_length,
                     beam_size=top_k,
-                    threshold=0.01
+                    threshold=0.5
                 )
                 
+                # 2. 尝试反向路径预测 (entity2 -> entity1)
+                reverse_paths = kc_model.predict_path(
+                    model=sacn_model,
+                    head_entity=entity2,
+                    tail_entity=entity1,
+                    max_depth=max_length,
+                    beam_size=top_k,
+                    threshold=0.5
+                )
+                
+                # 3. 合并并排序所有路径
+                all_paths = forward_paths + reverse_paths
+                all_paths.sort(key=lambda x: x[1], reverse=True)  # 按概率降序排序
+                
+                # 取前top_k条路径
+                selected_paths = all_paths[:top_k]
+                
+                inference_time = time.time() - start_time
+                
                 # 格式化模型预测的路径
-                for path, prob in predicted_paths:
+                paths = []
+                for path, prob in selected_paths:
                     path_info = []
                     # 路径格式: [e1, r1, e2, r2, e3, ...]
                     # 遍历路径中的每个关系步骤
@@ -430,12 +453,16 @@ class KGPCFindPath(View):
                         source = path[i]
                         relation = path[i+1]
                         target = path[i+2]
+                        
+                        # 检查是否是反向路径
+                        is_reverse = (source == entity2 and target == entity1)
+                        
                         path_info.append({
                             'source': source,
                             'target': target,
                             'relation': relation,
-                            'probability': float(prob),  # 整个路径的概率
-                            'source_type': 'model'  # 标记来源
+                            'probability': float(prob),
+                            'is_reverse': is_reverse
                         })
                     paths.append(path_info)
             
