@@ -12,7 +12,6 @@ from sklearn.metrics import normalized_mutual_info_score, adjusted_rand_score
 from sklearn.metrics.cluster import contingency_matrix
 from scipy.optimize import linear_sum_assignment
 
-
 class SACN(nn.Module):
     """基于强化实体表征的知识图谱补全模型（添加聚类功能）"""
 
@@ -148,6 +147,8 @@ class KnowledgeCompletion:
         self.entity2id = {entity: idx for idx, entity in enumerate(entity_embeddings.keys())}
         self.id2entity = {idx: entity for entity, idx in self.entity2id.items()}
         self.num_entities = len(self.entity2id)
+        self.patent_ids = {f"CN{idx+100000}" for entity, idx in self.entity2id.items()}
+        self.entity_ids = {entity for entity, idx in self.entity2id.items()}
 
         # 确保relation2id包含similar_to
         self.relation2id = {
@@ -478,6 +479,199 @@ class KnowledgeCompletion:
                 f.write(f"{rel[0]}---{rel[1]}---{rel[2]}\n")
 
         print(f"Generated {len(similar_relations)} similar_to relations, saved to {output_file}")
+
+    def is_patent(self, entity_id):
+        # 规则1：检查是否在预加载的专利ID集合中
+        # 规则2：检查是否符合专利ID格式（可选）
+        return entity_id in self.patent_ids
+
+    def get_kg_structure(self, entity_id, max_relations=50, depth=1):
+        """
+        获取多层知识图谱结构数据
+        Args:
+            entity_id: 实体ID或专利ID
+            max_relations: 每层最多返回的关系数量
+            depth: 查询深度（默认为1，只返回直接关联）
+        Returns:
+            dict: 包含节点和边的知识图谱结构数据
+        """
+        # 初始化数据结构
+        kg_data = {"nodes": [], "links": []}
+        visited_entities = set()  # 记录已访问的实体，避免循环
+        
+        def _dfs(current_entity, current_depth):
+            if current_depth > depth or current_entity in visited_entities:
+                return
+            
+            visited_entities.add(current_entity)
+            
+            # 获取当前实体的标准化ID和索引
+            if self.is_patent(current_entity):
+                entity_idx = self.entity2id[current_entity]
+                display_id = f"CN{entity_idx + 100000}"
+                entity_type = "patent"
+            else:
+                entity_idx = self.entity2id[current_entity]
+                display_id = current_entity
+                entity_type = "entity"
+            
+            # 添加当前节点
+            kg_data["nodes"].append({
+                "id": display_id,
+                "type": entity_type,
+                "label": current_entity,
+                "depth": current_depth  # 记录层级（可选）
+            })
+            
+            # 获取直接关联的三元组（限制数量）
+            related_triplets = [
+                (h, r, t) for h, r, t in self.triplets 
+                if h == entity_idx or t == entity_idx
+            ][:max_relations]
+            
+            # 处理关联关系
+            for h, r, t in related_triplets:
+                if h == entity_idx:  # 当前实体是头实体
+                    other_entity = self.id2entity[t]
+                    link = {
+                        "source": display_id,
+                        "target": other_entity,
+                        "relation": self.id2relation[r],
+                        "depth": current_depth
+                    }
+                    kg_data["links"].append(link)
+                    _dfs(other_entity, current_depth + 1)  # 递归下一层
+                    
+                elif t == entity_idx:  # 当前实体是尾实体
+                    other_entity = self.id2entity[h]
+                    link = {
+                        "source": other_entity,
+                        "target": display_id,
+                        "relation": self.id2relation[r],
+                        "depth": current_depth
+                    }
+                    kg_data["links"].append(link)
+                    _dfs(other_entity, current_depth + 1)  # 递归下一层
+        
+        entity_type = "patent" if self.is_patent(entity_id) else "entity"
+        if entity_type == "patent":
+            entity_id = self.id2entity[int(entity_id[2:])-100000]
+
+        if entity_id not in self.entity2id:
+            return {"error": "Entity not found"}
+            
+        # 开始递归遍历
+        _dfs(entity_id, 0)
+        
+        # 去重（虽然visited_entities已避免循环，但可能有多条路径到达同一节点）
+        kg_data["nodes"] = list({node["id"]: node for node in kg_data["nodes"]}.values())
+        kg_data["links"] = list({(link["source"], link["target"], link["relation"]): link for link in kg_data["links"]}.values())
+        
+        return kg_data
+    
+    def predict_relation(self, model, head_entity, tail_entity, top_k=5):
+        """
+        预测头实体和尾实体之间可能存在的关系
+        Args:
+            model: 训练好的模型
+            head_entity: 头实体ID
+            tail_entity: 尾实体ID
+            top_k: 返回前k个最可能的关系
+        Returns:
+            list: 可能的关系列表，每个元素为(关系, 概率)
+        """
+        # 获取实体索引
+        head_idx = self.entity2id[head_entity]
+        tail_idx = self.entity2id[tail_entity]
+        
+        model.eval()
+        results = []
+        
+        # 遍历所有关系
+        for rel in self.relation2id.keys():
+            rel_idx = self.relation2id[rel]
+            
+            with torch.no_grad():
+                h_tensor = torch.LongTensor([head_idx]).to(self.device)
+                r_tensor = torch.LongTensor([rel_idx]).to(self.device)
+                
+                # 预测所有尾实体的概率
+                pred = model(h_tensor, r_tensor)  # (1, num_entities)
+                pred_t = pred[0, tail_idx].item()  # 目标尾实体的概率
+                
+                results.append((rel, pred_t))
+        
+        # 按概率排序并返回top-k
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:top_k]
+
+    def predict_path(self, model, head_entity, tail_entity, max_depth=3, beam_size=5, threshold=0.5):
+        """
+        预测从头实体到尾实体的路径（使用beam search）
+        Args:
+            model: 训练好的模型
+            head_entity: 头实体ID
+            tail_entity: 尾实体ID
+            max_depth: 最大路径深度（跳数）
+            beam_size: beam search的宽度
+            threshold: 路径概率阈值
+        Returns:
+            list: 路径列表，每个元素为(path, path_probability)
+        """
+        head_idx = self.entity2id[head_entity]
+        tail_idx = self.entity2id[tail_entity]
+        
+        # 初始化beam: (current_entity, path, path_prob)
+        # path格式: [head_entity, relation1, entity1, relation2, entity2, ...]
+        beam = [(head_idx, [head_entity], 1.0)]
+        completed_paths = []
+        
+        for depth in range(max_depth):
+            new_beam = []
+            
+            for current_idx, path, path_prob in beam:
+                # 获取当前实体的所有可能关系
+                for rel in self.relation2id.keys():
+                    rel_idx = self.relation2id[rel]
+                    
+                    with torch.no_grad():
+                        h_tensor = torch.LongTensor([current_idx]).to(self.device)
+                        r_tensor = torch.LongTensor([rel_idx]).to(self.device)
+                        
+                        # 预测所有尾实体的概率
+                        pred = model(h_tensor, r_tensor).squeeze().cpu().numpy()
+                        
+                        # 获取概率最高的实体
+                        top_indices = np.argsort(pred)[::-1][:beam_size]
+                        
+                        for idx in top_indices:
+                            prob = pred[idx]
+                            new_prob = path_prob * prob
+                            
+                            # 跳过概率过低的路径
+                            if new_prob < threshold:
+                                continue
+                            
+                            new_entity = self.id2entity[idx]
+                            new_path = path + [rel, new_entity]
+                            
+                            # 如果到达目标实体
+                            if idx == tail_idx:
+                                completed_paths.append((new_path, new_prob))
+                            else:
+                                new_beam.append((idx, new_path, new_prob))
+            
+            # 如果没有新的候选路径，提前终止
+            if not new_beam:
+                break
+                
+            # 按路径概率排序并保留top beam_size
+            new_beam.sort(key=lambda x: x[2], reverse=True)
+            beam = new_beam[:beam_size]
+        
+        # 按路径概率排序并返回
+        completed_paths.sort(key=lambda x: x[1], reverse=True)
+        return completed_paths
 
     def evaluate_clustering(self, entity_clusters, true_labels=None):
         """

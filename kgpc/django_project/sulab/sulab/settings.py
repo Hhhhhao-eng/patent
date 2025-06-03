@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     'kgpc.apps.KgpcConfig',  # 确保应用已注册
+    'django_extensions',
 ]
 
 MIDDLEWARE = [
