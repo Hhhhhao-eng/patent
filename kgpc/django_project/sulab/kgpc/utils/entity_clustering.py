@@ -528,7 +528,7 @@ class KnowledgeCompletion:
                 (h, r, t) for h, r, t in self.triplets 
                 if h == entity_idx or t == entity_idx
             ][:max_relations]
-            
+            print("related_triplets",related_triplets)
             # 处理关联关系
             for h, r, t in related_triplets:
                 if h == entity_idx:  # 当前实体是头实体
