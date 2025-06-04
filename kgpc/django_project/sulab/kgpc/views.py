@@ -202,17 +202,14 @@ class KnowledgeGraphData(View):
             
             resources = get_resources()
             kc_model = resources["kc_model"]
-            
-            # 优先使用patent_id，若无则使用entity_id
             target_id = patent_id if patent_id else entity_id
-            
-            # 获取知识图谱结构数据
             kg_data = kc_model.get_kg_structure(target_id,depth=1)
             
             if "error" in kg_data:
                 return JsonResponse(kg_data, status=404)
                 
-            return JsonResponse({'data': kg_data})
+            # 关键：返回中文直接可读
+            return JsonResponse({'data': kg_data}, json_dumps_params={'ensure_ascii': False})
             
         except Exception as e:
             logger.error(f"Knowledge graph error: {str(e)}", exc_info=True)

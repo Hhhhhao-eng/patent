@@ -58,6 +58,13 @@ export default {
     initGraph() {
       const container = this.$refs.graph;
       container.innerHTML = '';
+      // 新增：过滤无效边，保证 source/target 都在 nodes 中
+      if (this.graphData && this.graphData.nodes && this.graphData.links) {
+        const nodeIds = new Set(this.graphData.nodes.map(n => n.id));
+        this.graphData.links = this.graphData.links.filter(
+          l => nodeIds.has(l.source) && nodeIds.has(l.target)
+        );
+      }
       if (!this.graphData || !this.graphData.nodes || !this.graphData.links) {
         this.$message.error('知识图谱数据为空');
         return;
