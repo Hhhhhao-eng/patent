@@ -1,18 +1,20 @@
 <template>
   <div class="graph-container">
-    <div class="card">
-      <el-page-header @back="$router.go(-1)" title="返回" />
-      <div class="graph-header">
-        <h2>{{ patent.title }} <span class="subtitle">知识图谱</span></h2>
-        <div class="controls">
-          <el-button icon="el-icon-download" @click="exportImage">导出图片</el-button>
-        </div>
+    <el-page-header @back="$router.go(-1)" title="返回" />
+    
+    <div class="graph-header">
+      <h2>{{ patent.title }} - 知识图谱</h2>
+      <div class="controls">
+        <el-button icon="el-icon-refresh" @click="refreshGraph">重新布局</el-button>
+        <el-button icon="el-icon-download" @click="exportImage">导出图片</el-button>
       </div>
-      <div ref="graph" class="graph-canvas"></div>
-      <div v-if="loading" class="loading-overlay">
-        <el-spinner size="large" />
-        <p>正在生成知识图谱...</p>
-      </div>
+    </div>
+    
+    <div ref="graph" class="graph-canvas"></div>
+    
+    <div v-if="loading" class="loading-overlay">
+      <el-spinner size="large" />
+      <p>正在生成知识图谱...</p>
     </div>
   </div>
 </template>
@@ -30,8 +32,7 @@ export default {
       graphData: null,
       loading: false,
       svg: null,
-      simulation: null,
-      exporting: false
+      simulation: null
     }
   },
   mounted() {
@@ -43,10 +44,11 @@ export default {
         this.loading = true;
         // 获取专利基础数据
         const patentRes = await patentApi.getPatentDetail(this.id);
-        this.patent = patentRes.data.data;
+        this.patent = patentRes.data;
         // 获取图谱数据
         const graphRes = await patentApi.getPatentGraph(this.id);
-        this.graphData = graphRes.data.data;
+        this.graphData = graphRes.data;
+        
         this.initGraph();
       } catch (err) {
         this.$message.error('获取图谱数据失败');
@@ -58,16 +60,8 @@ export default {
     initGraph() {
       const container = this.$refs.graph;
       container.innerHTML = '';
-      if (!this.graphData || !this.graphData.nodes || !this.graphData.links) {
-        this.$message.error('知识图谱数据为空');
-        return;
-      }
-      // 新增：无关系时友好提示
-      if (this.graphData.nodes.length === 1 && this.graphData.links.length === 0) {
-        container.innerHTML = '<div style="text-align:center;color:#999;padding:60px 0;">该专利暂无关联关系，仅有自身节点</div>';
-        return;
-      }
-      const width = container.clientWidth || 900;
+      
+      const width = container.clientWidth;
       const height = 600;
       
       // 创建SVG画布
@@ -110,7 +104,7 @@ export default {
         .data(this.graphData.nodes)
         .enter()
         .append('text')
-        .text(d => d.label || d.name || d.id)
+        .text(d => d.name)
         .attr('font-size', 12)
         .attr('dx', 15)
         .attr('dy', 4);
@@ -165,23 +159,6 @@ export default {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-    },
-    
-    async exportToNeo4j() {
-      if (this.exporting) return;
-      this.exporting = true;
-      try {
-        const res = await patentApi.exportGraphToNeo4j(this.id);
-        if (res.data && res.data.success) {
-          this.$message.success('导出到Neo4j成功！');
-        } else {
-          this.$message.error(res.data && res.data.error ? res.data.error : '导出失败');
-        }
-      } catch (err) {
-        this.$message.error('导出到Neo4j失败');
-      } finally {
-        this.exporting = false;
-      }
     }
   }
 }
@@ -190,37 +167,17 @@ export default {
 <style scoped>
 .graph-container {
   max-width: 1200px;
-  margin: 40px auto;
-  padding: 0;
-  background: #f6f8fa;
+  margin: 20px auto;
+  padding: 20px;
 }
-.card {
-  background: #fff;
-  border-radius: 10px;
-  box-shadow: 0 2px 12px #e6e6e6;
-  padding: 32px 36px 28px 36px;
-}
+
 .graph-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin: 20px 0 18px 0;
+  margin: 20px 0;
 }
-.graph-header h2 {
-  font-size: 1.5rem;
-  font-weight: 600;
-  margin: 0;
-}
-.subtitle {
-  font-size: 1rem;
-  color: #888;
-  margin-left: 12px;
-  font-weight: 400;
-}
-.controls {
-  display: flex;
-  gap: 12px;
-}
+
 .graph-canvas {
   width: 100%;
   height: 600px;
@@ -229,6 +186,7 @@ export default {
   background-color: #fafafa;
   position: relative;
 }
+
 .loading-overlay {
   position: absolute;
   top: 0;

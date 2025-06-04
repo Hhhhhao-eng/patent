@@ -189,3 +189,14 @@ def build_sample_patent_data():
                 current_patent[9] = ';'.join(values)  # 申请人
 
     print(f"Built patent data for {len(patent_data_dict)} patents (using PID as key)")
+
+
+if __name__ == "__main__":
+    # 自动导出 pid-title 对应表
+    from kgpc.utils.model_loader import get_resources
+    resources = get_resources()
+    patent_data_dict = resources.get("patent_data_dict", {})
+    with open("pid_title_map.txt", "w", encoding="utf-8") as f:
+        for pid, data in patent_data_dict.items():
+            f.write(f"{pid}\t{data[1]}\n")
+    print("已导出 pid_title_map.txt")

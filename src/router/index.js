@@ -2,8 +2,6 @@ import { createRouter, createWebHistory } from 'vue-router'
 import KGPC from '@/views/AI/KGPC/index.vue'
 import PatentDetail from '@/views/Detail.vue'
 import PatentGraph from '@/views/Graph.vue'
-import RelationInfer from '@/views/AI/KGPC/RelationInfer.vue'
-import PathFinder from '@/views/AI/KGPC/PathFinder.vue'
 
 const routes = [
   {
@@ -22,16 +20,6 @@ const routes = [
     name: 'PatentGraph',
     component: PatentGraph,
     props: true
-  },
-  {
-    path: '/AI/KGPC/relation-infer',
-    name: 'RelationInfer',
-    component: RelationInfer
-  },
-  {
-    path: '/AI/KGPC/path-finder',
-    name: 'PathFinder',
-    component: PathFinder
   },
   {
     path: '/:pathMatch(.*)*',

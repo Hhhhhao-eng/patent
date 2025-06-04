@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import PatentRecommend, PatentDetail, KnowledgeGraphData, Neo4jExport,KGPCInferRelation,KGPCFindPath
+from .views import PatentRecommend, PatentDetail, KnowledgeGraphData, Neo4jExport, KGPCInferRelation, KGPCFindPath, EntityListView
 
 app_name = 'kgpc'  # 添加这行很重要
 
@@ -10,5 +10,6 @@ urlpatterns = [
     path('graph/neo4j/', Neo4jExport.as_view(), name='knowledge_graph_neo4j'),
     path('kgpc/infer/relation/', KGPCInferRelation.as_view(), name='kgpc_infer_relation'),
     path('kgpc/infer/path/', KGPCFindPath.as_view(), name='kgpc_find_path'),
+    path('kgpc/entity_list/', EntityListView.as_view(), name='kgpc_entity_list'),
     # 可以根据需要添加 path('kgpc/path/', ...) 等其他接口
 ]

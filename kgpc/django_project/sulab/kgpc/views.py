@@ -9,6 +9,7 @@ from django.shortcuts import redirect
 from django.urls import reverse
 import networkx as nx
 import time
+import os
 
 # 连接 Neo4j（默认密码为 'neo4j'）
 graph = Graph("bolt://localhost:7687", auth=("neo4j", "zeng200312"))
@@ -483,3 +484,30 @@ class KGPCFindPath(View):
                 {"error": "Internal server error"},
                 status=500
             )
+
+class EntityListView(View):
+    """返回实体名列表（前5000个）"""
+    def get(self, request):
+        try:
+            resources = get_resources()
+            entity2id = resources.get("entity2id", {})
+            entity_list = list(entity2id.keys())[:5000]
+            return JsonResponse({'entities': entity_list})
+        except Exception as e:
+            logger.error(f"Entity list error: {str(e)}", exc_info=True)
+            return JsonResponse({"error": "Internal server error"}, status=500)
+
+# 工具函数：导出所有pid-title对应关系到txt文件
+def export_pid_title_map():
+    resources = get_resources()
+    patent_data_dict = resources.get("patent_data_dict", {})
+    out_path = os.path.join(os.path.dirname(__file__), "pid_title_map.txt")
+    with open(out_path, "w", encoding="utf-8") as f:
+        for pid, data in patent_data_dict.items():
+            f.write(f"{pid}\t{data[1]}\n")
+    print(f"导出完成: {out_path}")
+
+# 你可以在Django shell中调用：
+# from kgpc.views import export_pid_title_map
+# export_pid_title_map()
+# 或临时在某个接口调用它
