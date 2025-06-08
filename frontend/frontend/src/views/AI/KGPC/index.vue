@@ -113,44 +113,56 @@ export default {
     },
     async findPidByTitle(title) {
       try {
-        // 修改为根路径，适配 public 目录
         const response = await fetch('/pid_title_map.txt');
-        console.log('fetch /pid_title_map.txt:', response.ok, response.status);
         if (response.ok) {
           const text = await response.text();
           const lines = text.split('\n');
-          console.log('pid_title_map.txt 前5行:', lines.slice(0, 5));
           const normalize = str => str.replace(/\s|\p{P}|\u3000/gu, '').toLowerCase();
           const getPinyin = this.getPinyin;
           const input = normalize(title);
-          let found = false;
+          let strictPid = '';
+          let fuzzyPid = '';
           for (const line of lines) {
             if (!line) continue;
             const [pid, t] = line.split('\t');
             if (!t) continue;
             const tNorm = normalize(t);
-            // 宽松匹配：原文、去空格标点、拼音首字母
+            // 严格匹配（全等或拼音全等）
             if (
               tNorm === input ||
-              t.trim().toLowerCase() === title.trim().toLowerCase() ||
-              getPinyin && getPinyin(t).toLowerCase() === getPinyin(title).toLowerCase() ||
-              tNorm.includes(input) ||
-              getPinyin && getPinyin(t).toLowerCase().includes(getPinyin(title).toLowerCase())
+              (getPinyin && getPinyin(t).toLowerCase() === getPinyin(title).toLowerCase())
             ) {
-              this.searchObj.patent_id = pid;
-              this.searchRecommend();
-              found = true;
+              strictPid = pid;
               break;
             }
           }
-          if (!found) {
-            this.searchObj.patent_id = '';
+          if (strictPid) {
+            this.searchObj.patent_id = strictPid;
+            this.searchRecommend();
+            return;
           }
+          // 模糊匹配（包含、去空格、大小写不敏感等）
+          for (const line of lines) {
+            if (!line) continue;
+            const [pid, t] = line.split('\t');
+            if (!t) continue;
+            const tNorm = normalize(t);
+            if (
+              tNorm.includes(input) ||
+              (getPinyin && getPinyin(t).toLowerCase().includes(getPinyin(title).toLowerCase()))
+            ) {
+              if (pid !== 'CN100000') {
+                fuzzyPid = pid;
+                break;
+              }
+            }
+          }
+          this.searchObj.patent_id = fuzzyPid;
+          this.searchRecommend();
         } else {
           this.searchObj.patent_id = '';
         }
       } catch (e) {
-        console.log('fetch pid_title_map.txt error:', e);
         this.searchObj.patent_id = '';
       }
     },

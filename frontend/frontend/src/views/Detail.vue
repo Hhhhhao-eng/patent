@@ -15,7 +15,9 @@
         </template>
         <div class="patent-info">
           <div><strong>申请人:</strong> {{ patent.applicantName }}</div>
-          <div><strong>发明人:</strong> {{ patent.inventorName }}</div>
+          <div><strong>关键词:</strong> {{ (patent.keywords || '').split(';').filter(Boolean).slice(0,5).join('；') }}</div>
+          <div><strong>专利要求:</strong> {{ (patent.claims || '').split(';').filter(Boolean).slice(0,5).join('；') }}</div>
+          <div><strong>背景技术:</strong> {{ (patent.background || '').split(';').filter(Boolean).slice(0,5).join('；') }}</div>
           <div><strong>分类号:</strong> {{ patent.mainIpc }} ({{ patent.ipc }})</div>
           <div><strong>地址:</strong> {{ patent.address }}</div>
         </div>

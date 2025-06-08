@@ -163,6 +163,21 @@ class PatentDetail(View):
                 }, status=404)
             
             p = patent_data_dict[patent_pid]
+
+            def clean_field(val):
+                if not val:
+                    return ''
+                # 如果是字符串且以[开头或]结尾，尝试解析为列表
+                if isinstance(val, str) and (val.startswith('[') or val.endswith(']')):
+                    try:
+                        items = eval(val)
+                        if isinstance(items, list):
+                            return '; '.join(str(x) for x in items)
+                    except:
+                        # 如果解析失败，去除首尾中括号和多余引号
+                        return val.strip('[]').replace("'", "")
+                return str(val)
+
             patent_detail = {
                 'id': patent_pid,  # 专利ID
                 'pid': p[0],      # 专利号
@@ -175,12 +190,14 @@ class PatentDetail(View):
                 'mainIpc': p[7],  # 主分类号
                 'ipc': p[8],       # 分类号
                 'applicantName': p[9],  # 申请人
-                'inventorName': p[10],  # 发明人
                 'address': p[11],      # 地址
-                'abs': p[12]            # 摘要
+                'abs': p[12],           # 摘要
+                'keywords': clean_field(p[13]),      # 关键词
+                'background': clean_field(p[14]),    # 背景技术
+                'claims': clean_field(p[15])         # 权利要求
             }
             
-            return JsonResponse({'data': patent_detail})
+            return JsonResponse({'data': patent_detail}, json_dumps_params={'ensure_ascii': False})
             
         except Exception as e:
             logger.error(f"Patent detail error: {str(e)}", exc_info=True)
@@ -196,21 +213,15 @@ class KnowledgeGraphData(View):
         try:
             patent_id = request.GET.get('patent_id')
             entity_id = request.GET.get('entity_id')
-            
             if not patent_id and not entity_id:
                 return JsonResponse({'error': 'Missing patent_id or entity_id'}, status=400)
-            
             resources = get_resources()
             kc_model = resources["kc_model"]
             target_id = patent_id if patent_id else entity_id
-            kg_data = kc_model.get_kg_structure(target_id,depth=1)
-            
+            kg_data = kc_model.get_kg_structure(target_id)  
             if "error" in kg_data:
                 return JsonResponse(kg_data, status=404)
-                
-            # 关键：返回中文直接可读
             return JsonResponse({'data': kg_data}, json_dumps_params={'ensure_ascii': False})
-            
         except Exception as e:
             logger.error(f"Knowledge graph error: {str(e)}", exc_info=True)
             return JsonResponse(

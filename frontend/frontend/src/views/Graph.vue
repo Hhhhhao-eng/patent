@@ -31,7 +31,8 @@ export default {
       loading: false,
       svg: null,
       simulation: null,
-      exporting: false
+      exporting: false,
+      depth: undefined, // 不再使用
     }
   },
   mounted() {
@@ -44,7 +45,7 @@ export default {
         // 获取专利基础数据
         const patentRes = await patentApi.getPatentDetail(this.id);
         this.patent = patentRes.data.data;
-        // 获取图谱数据
+        // 获取图谱数据（不再传递depth参数）
         const graphRes = await patentApi.getPatentGraph(this.id);
         this.graphData = graphRes.data.data;
         this.initGraph();
@@ -58,7 +59,6 @@ export default {
     initGraph() {
       const container = this.$refs.graph;
       container.innerHTML = '';
-      // 新增：过滤无效边，保证 source/target 都在 nodes 中
       if (this.graphData && this.graphData.nodes && this.graphData.links) {
         const nodeIds = new Set(this.graphData.nodes.map(n => n.id));
         this.graphData.links = this.graphData.links.filter(
@@ -69,37 +69,49 @@ export default {
         this.$message.error('知识图谱数据为空');
         return;
       }
-      // 新增：无关系时友好提示
       if (this.graphData.nodes.length === 1 && this.graphData.links.length === 0) {
         container.innerHTML = '<div style="text-align:center;color:#999;padding:60px 0;">该专利暂无关联关系，仅有自身节点</div>';
         return;
       }
       const width = container.clientWidth || 900;
       const height = 600;
-      
-      // 创建SVG画布
+      container.style.resize = 'both';
+      container.style.overflow = 'auto';
+
+      // 创建SVG画布，支持缩放和平移
       this.svg = d3.select(container)
         .append('svg')
-        .attr('width', width)
-        .attr('height', height);
-      
+        .attr('width', '100%')
+        .attr('height', height)
+        .attr('viewBox', [0, 0, width, height].join(' '))
+        .call(
+          d3.zoom()
+            .scaleExtent([0.2, 5])
+            .on('zoom', (event) => {
+              g.attr('transform', event.transform);
+            })
+        );
+
+      // 创建分组用于缩放
+      const g = this.svg.append('g');
+
       // 创建力导向图
       this.simulation = d3.forceSimulation(this.graphData.nodes)
         .force('link', d3.forceLink(this.graphData.links).id(d => d.id).distance(100))
         .force('charge', d3.forceManyBody().strength(-300))
         .force('center', d3.forceCenter(width / 2, height / 2));
-      
+
       // 绘制连线
-      const link = this.svg.append('g')
+      const link = g.append('g')
         .selectAll('line')
         .data(this.graphData.links)
         .enter()
         .append('line')
         .attr('stroke', '#99a9bf')
         .attr('stroke-width', 2);
-      
+
       // 绘制节点
-      const node = this.svg.append('g')
+      const node = g.append('g')
         .selectAll('circle')
         .data(this.graphData.nodes)
         .enter()
@@ -110,9 +122,9 @@ export default {
           .on('start', this.dragStarted)
           .on('drag', this.dragged)
           .on('end', this.dragEnded));
-      
+
       // 添加标签
-      const text = this.svg.append('g')
+      const text = g.append('g')
         .selectAll('text')
         .data(this.graphData.nodes)
         .enter()
@@ -121,7 +133,7 @@ export default {
         .attr('font-size', 12)
         .attr('dx', 15)
         .attr('dy', 4);
-      
+
       // 更新位置
       this.simulation.on('tick', () => {
         link
@@ -129,11 +141,9 @@ export default {
           .attr('y1', d => d.source.y)
           .attr('x2', d => d.target.x)
           .attr('y2', d => d.target.y);
-          
         node
           .attr('cx', d => d.x)
           .attr('cy', d => d.y);
-          
         text
           .attr('x', d => d.x)
           .attr('y', d => d.y);
@@ -235,6 +245,8 @@ export default {
   border-radius: 4px;
   background-color: #fafafa;
   position: relative;
+  resize: both;
+  overflow: auto;
 }
 .loading-overlay {
   position: absolute;

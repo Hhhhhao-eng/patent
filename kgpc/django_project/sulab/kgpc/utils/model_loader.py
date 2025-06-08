@@ -178,15 +178,27 @@ def build_sample_patent_data():
                 else:
                     values = [values_part.strip("'\"")]
 
-            # 更新专利数据
+            # 更新专利数据（累加而不是覆盖）
             if relation_type == 'titleKey' and values:
-                current_patent[13] = ';'.join(values)  # 关键词
+                if current_patent[13]:
+                    current_patent[13] += ';' + ';'.join(values)
+                else:
+                    current_patent[13] = ';'.join(values)
             elif relation_type == 'clKey' and values:
-                current_patent[15] = ';'.join(values)  # 权利要求
+                if current_patent[15]:
+                    current_patent[15] += ';' + ';'.join(values)
+                else:
+                    current_patent[15] = ';'.join(values)
             elif relation_type == 'bgKey' and values:
-                current_patent[14] = ';'.join(values)  # 背景技术
+                if current_patent[14]:
+                    current_patent[14] += ';' + ';'.join(values)
+                else:
+                    current_patent[14] = ';'.join(values)
             elif relation_type == 'patentee' and values:
-                current_patent[9] = ';'.join(values)  # 申请人
+                if current_patent[9]:
+                    current_patent[9] += ';' + ';'.join(values)
+                else:
+                    current_patent[9] = ';'.join(values)
 
     print(f"Built patent data for {len(patent_data_dict)} patents (using PID as key)")
 
